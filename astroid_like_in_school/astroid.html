@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asteroid Shooter Bookmarklet</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        h1,
+        h2 {
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        .bookmarklet {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .instructions {
+            background-color: #f8f8f8;
+            border-left: 4px solid #4CAF50;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Asteroid Shooter Bookmarklet</h1>
+
+    <div class="instructions">
+        <h2>Anleitung:</h2>
+        <ol>
+            <li>Ziehe diesen Link in deine Lesezeichenleiste:
+                <a class="bookmarklet"
+                    href="javascript:(function(){var s=document.createElement('style');s.innerHTML='#as-game{position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;pointer-events:none}.as-destroyed{opacity:0!important;transition:opacity 0.5s}.as-split-container{position:absolute;overflow:hidden;z-index:10000;pointer-events:none}.as-split-left{transition:transform 500ms ease-in,opacity 500ms}.as-split-right{transition:transform 500ms ease-in,opacity 500ms}.as-laser{position:fixed;background:#ff5555;border-radius:2px;box-shadow:0 0 8px #ff0000;transform-origin:top center;pointer-events:none;z-index:10000}.as-laser-impact{position:fixed;background:radial-gradient(circle,rgba(255,255,255,1) 0%,rgba(255,85,85,1) 70%,rgba(255,0,0,0) 100%);width:20px;height:20px;border-radius:50%;pointer-events:none;z-index:10001;animation:impact 0.3s forwards}@keyframes impact{0%{transform:scale(0.5);opacity:1}100%{transform:scale(1.5);opacity:0}}';document.head.appendChild(s);var c=document.createElement('canvas');c.id='as-game';document.body.appendChild(c);function r(){c.width=window.innerWidth;c.height=window.innerHeight}r();window.addEventListener('resize',r);var x=c.getContext('2d');var p={x:c.width/2,y:c.height-50,w:30,h:30,vx:0,vy:0,maxSpeed:4,thrust:0.08,drag:0.98,angle:0,rotSpeed:0.04};var lasers=[];var k={};function getTextNodesIn(el){var textNodes=[];if(el.nodeType==3){textNodes.push(el)}else{var children=el.childNodes;for(var j=0;j<children.length;j++){textNodes.push.apply(textNodes,getTextNodesIn(children[j]))}}return textNodes}function getRect(element){if(typeof element.getBoundingClientRect==='function'){var rect=element.getBoundingClientRect();return{width:rect.width,height:rect.height,left:rect.left,top:rect.top}}var rect={width:element.offsetWidth,height:element.offsetHeight,left:0,top:0};var el=element;while(el){rect.left+=el.offsetLeft;rect.top+=el.offsetTop;el=el.offsetParent}return rect}function createSplitContainers(element){var coords=getRect(element);var leftContainer=document.createElement('div');leftContainer.className='as-split-container as-split-left';leftContainer.style.left=coords.left+'px';leftContainer.style.top=coords.top+'px';leftContainer.style.width=(coords.width*0.5)+'px';leftContainer.style.height=coords.height+'px';var rightContainer=document.createElement('div');rightContainer.className='as-split-container as-split-right';rightContainer.style.left=(coords.left+coords.width/2)+'px';rightContainer.style.top=coords.top+'px';rightContainer.style.width=(coords.width*0.5)+'px';rightContainer.style.height=coords.height+'px';var leftClone=element.cloneNode(true);var rightClone=element.cloneNode(true);var cloneStyles={margin:0,overflow:'hidden'};for(var prop in cloneStyles){leftClone.style[prop]=cloneStyles[prop];rightClone.style[prop]=cloneStyles[prop]}leftContainer.appendChild(leftClone);rightContainer.appendChild(rightClone);rightContainer.scrollLeft=coords.width/2;document.body.appendChild(leftContainer);document.body.appendChild(rightContainer);setTimeout(function(){leftContainer.style.transform='rotate(-'+random(30,50)+'deg) translate(-100px, 40px)';leftContainer.style.opacity='0';rightContainer.style.transform='rotate('+random(30,50)+'deg) translate(100px, 40px)';rightContainer.style.opacity='0'},10);setTimeout(function(){if(leftContainer.parentNode)leftContainer.parentNode.removeChild(leftContainer);if(rightContainer.parentNode)rightContainer.parentNode.removeChild(rightContainer)},1000);element.style.opacity='0';element.style.visibility='hidden';element.classList.add('as-destroyed');return[leftContainer,rightContainer]}function random(min,max){return Math.floor(Math.random()*(max-min+1)+min)}function processHitElement(el){if(!el||el.id==='as-game'||el===document.body||el===document.documentElement||el.contains(c)||el.classList.contains('as-destroyed')||el.classList.contains('as-laser')||el.classList.contains('as-laser-impact')){return false}if(el.tagName==='SCRIPT'||el.tagName==='STYLE'||el.tagName==='META'||el.tagName==='HEAD'||el.tagName==='TITLE'){return false}if(el.nodeType===3||(el.childNodes&&el.childNodes.length>0)){var textNodes=getTextNodesIn(el);if(textNodes.length>0){var validTextNodes=[];for(var t=0;t<textNodes.length;t++){if(textNodes[t].nodeValue&&textNodes[t].nodeValue.trim().length>1){validTextNodes.push(textNodes[t])}}if(validTextNodes.length>0){var textNode=validTextNodes[Math.floor(Math.random()*validTextNodes.length)];var parent=textNode.parentNode;var text=textNode.nodeValue;if(text&&text.length>1){var splitIndex=Math.floor(text.length/2);var firstHalf=text.substring(0,splitIndex);var secondHalf=text.substring(splitIndex);textNode.nodeValue=firstHalf;var span=document.createElement('span');span.appendChild(document.createTextNode(secondHalf));span.classList.add('as-destroyed');if(parent){parent.insertBefore(span,textNode.nextSibling)}return true}else{el.classList.add('as-destroyed');return true}}else{createSplitContainers(el);return true}}else{createSplitContainers(el);return true}}else{createSplitContainers(el);return true}return false}function createImpactEffect(x,y){var impact=document.createElement('div');impact.className='as-laser-impact';impact.style.left=(x-10)+'px';impact.style.top=(y-10)+'px';document.body.appendChild(impact);setTimeout(function(){if(impact.parentNode){impact.parentNode.removeChild(impact)}},300)}function fireLaser(){var radAngle=(p.angle-90)*Math.PI/180;var tipX=p.x+Math.cos(radAngle)*(p.h/2);var tipY=p.y+Math.sin(radAngle)*(p.h/2);var laser={startX:tipX,startY:tipY,angle:p.angle,element:document.createElement('div'),length:0,maxLength:15000,growing:true,speed:2000,createdAt:performance.now(),hits:[]};laser.element.className='as-laser';laser.element.style.left=laser.startX+'px';laser.element.style.top=laser.startY+'px';laser.element.style.width='3px';laser.element.style.height='0px';laser.element.style.transform='rotate('+(laser.angle+180)+'deg)';document.body.appendChild(laser.element);lasers.push(laser);return laser}function updateLasers(tdelta){for(var i=0;i<lasers.length;i++){var laser=lasers[i];var now=performance.now();var elapsed=(now-laser.createdAt)/1000;if(laser.growing){laser.length=Math.min(laser.speed*elapsed,laser.maxLength);laser.element.style.height=laser.length+'px';checkLaserCollisions(laser);if(laser.length>=laser.maxLength||elapsed>0.2){laser.growing=false}}else{laser.element.style.opacity=Math.max(0,1-(elapsed-0.2)*5);if(elapsed>0.4){if(laser.element.parentNode){laser.element.parentNode.removeChild(laser.element)}lasers.splice(i,1);i--}}}}function checkLaserCollisions(laser){var radAngle=(laser.angle-90)*Math.PI/180;var checkPoints=10;var step=laser.length/checkPoints;for(var i=0;i<checkPoints;i++){var distance=i*step;var checkX=laser.startX+Math.cos(radAngle)*distance;var checkY=laser.startY+Math.sin(radAngle)*distance;if(checkX<0||checkX>window.innerWidth||checkY<0||checkY>window.innerHeight){continue}var el=document.elementFromPoint(checkX,checkY);if(el&&!laser.hits.includes(el)&&el.id!=='as-game'&&el!==document.body&&el!==document.documentElement&&!el.contains(c)&&!el.classList.contains('as-destroyed')&&!el.classList.contains('as-laser')&&!el.classList.contains('as-laser-impact')){laser.hits.push(el);if(processHitElement(el)){createImpactEffect(checkX,checkY)}}}}document.addEventListener('keydown',function(e){k[e.key]=true;if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].indexOf(e.key)>=0)e.preventDefault();if(e.key===' '&&!k.cd){fireLaser();k.cd=true;setTimeout(function(){k.cd=false},250)}});document.addEventListener('keyup',function(e){k[e.key]=false});function u(timestamp){var tdelta=(timestamp-lastTimestamp)/1000;lastTimestamp=timestamp;if(isNaN(tdelta)||tdelta>0.1)tdelta=0.016;x.clearRect(0,0,c.width,c.height);if(k.ArrowLeft)p.angle-=p.rotSpeed*180/Math.PI;if(k.ArrowRight)p.angle+=p.rotSpeed*180/Math.PI;var radAngle=(p.angle-90)*Math.PI/180;if(k.ArrowUp){p.vx+=Math.cos(radAngle)*p.thrust;p.vy+=Math.sin(radAngle)*p.thrust}if(k.ArrowDown){p.vx-=Math.cos(radAngle)*p.thrust;p.vy-=Math.sin(radAngle)*p.thrust}var speed=Math.sqrt(p.vx*p.vx+p.vy*p.vy);if(speed>p.maxSpeed){var factor=p.maxSpeed/speed;p.vx*=factor;p.vy*=factor}p.vx*=p.drag;p.vy*=p.drag;p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=c.width;if(p.x>c.width)p.x=0;if(p.y<0)p.y=c.height;if(p.y>c.height)p.y=0;updateLasers(tdelta);x.save();x.translate(p.x,p.y);x.rotate(radAngle);x.fillStyle='#3498db';x.beginPath();x.moveTo(p.w/2,0);x.lineTo(-p.w/2,-p.h/2);x.lineTo(-p.w/2,p.h/2);x.closePath();x.fill();if(k.ArrowUp){x.fillStyle='#e74c3c';x.beginPath();x.moveTo(-p.w/2,-5);x.lineTo(-p.w/2-10,0);x.lineTo(-p.w/2,5);x.closePath();x.fill()}x.restore()}var lastTimestamp=0;function gameLoop(timestamp){u(timestamp);requestAnimationFrame(gameLoop)}requestAnimationFrame(gameLoop);console.log('Asteroid Shooter started! Use Left/Right arrows to rotate, Up/Down for thrust, Space to shoot')})();">Asteroid
+                    Shooter</a>
+            </li>
+            <li>Besuche eine beliebige Webseite</li>
+            <li>Klicke auf das Lesezeichen "Asteroid Shooter" in deiner Lesezeichenleiste</li>
+        </ol>
+    </div>
+
+    <h2>Verbesserte Spielsteuerung:</h2>
+    <ul>
+        <li><strong>Pfeiltasten Links/Rechts:</strong> Raumschiff rotieren</li>
+        <li><strong>Pfeiltasten Hoch/Runter:</strong> Vorwärts/Rückwärts Schub geben</li>
+        <li><strong>Leertaste:</strong> Schießen</li>
+        <li>Ziele auf Elemente der Webseite, um sie zu zerstören (auszublenden)</li>
+    </ul>
+
+    <div class="warning">
+        <h3>Hinweise:</h3>
+        <ul>
+            <li>Manche Webseiten blockieren Bookmarklets aufgrund von Sicherheitseinstellungen</li>
+            <li>Um das Spiel zu beenden, lade die Seite neu (F5)</li>
+            <li>Du musst möglicherweise zuerst auf die Webseite klicken, damit die Tastensteuerung funktioniert</li>
+        </ul>
+    </div>
+
+    <h2>Neue Funktionen:</h2>
+    <ul>
+        <li><strong>Langsamere Beschleunigung:</strong> Es dauert länger, bis das Raumschiff seine maximale
+            Geschwindigkeit erreicht</li>
+        <li><strong>Bessere Laser:</strong> Die Laser sind größer, röter und fliegen weiter (15000 Pixel)</li>
+        <li><strong>Intelligentere Text-Zerstörung:</strong> Das Spiel kann jetzt einzelne Textelemente und Wörter
+            gezielter zerstören</li>
+        <li><strong>Korrekte Ausrichtung:</strong> Das Raumschiff zeigt in die richtige Richtung</li>
+        <li><strong>Wrap-Around:</strong> Das Raumschiff erscheint auf der anderen Seite, wenn es den Bildschirmrand
+            verlässt</li>
+    </ul>
+
+    <p>Viel Spaß beim Spielen!</p>
+</body>
+
+</html>
