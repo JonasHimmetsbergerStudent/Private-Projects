@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Head Tracking Cube - No Smoothing</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+
+        #mainCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #videoElement {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 240px;
+            height: 180px;
+            border-radius: 5px;
+            border: 1px solid #555;
+            transform: scaleX(-1);
+            background-color: #000;
+            z-index: 100;
+        }
+
+        #eyeMarkerCanvas {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 240px;
+            height: 180px;
+            pointer-events: none;
+            transform: scaleX(-1);
+            z-index: 101;
+        }
+
+        .info-panel {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 13px;
+            z-index: 100;
+        }
+
+        #trackingInfoBox {
+            bottom: 10px;
+            left: 10px;
+        }
+
+        #trackingInfoBox span {
+            font-weight: bold;
+        }
+
+        #calibrationBox {
+            top: 10px;
+            left: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #calibrationBox label {
+            font-size: 12px;
+        }
+
+        #calibrationBox input[type="number"] {
+            padding: 4px;
+            border-radius: 3px;
+            border: 1px solid #444;
+            background-color: #333;
+            color: white;
+            width: 60px;
+        }
+
+        #calibrationBox button {
+            padding: 5px 10px;
+            border-radius: 3px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        #calibrationBox button:hover {
+            background-color: #0056b3;
+        }
+
+        #calibrationStatus {
+            font-size: 11px;
+            color: #a0a0a0;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="mainCanvas"></canvas>
+    <video id="videoElement" autoplay muted playsinline></video>
+    <canvas id="eyeMarkerCanvas"></canvas>
+
+    <div id="calibrationBox" class="info-panel">
+        <div>
+            <label for="knownDistanceInput">Your Distance (cm): </label>
+            <input type="number" id="knownDistanceInput" value="50" min="10" max="200">
+        </div>
+        <button id="calibrateButton">Calibrate</button>
+        <div id="calibrationStatus">Calibrate if distance is off.</div>
+    </div>
+
+    <div id="trackingInfoBox" class="info-panel">
+        Distance: <span id="distanceDisplay">N/A</span><br>
+        IPD (px): <span id="ipdDisplay">N/A</span><br>
+        Head X: <span id="headXDisplay">N/A</span>, Y: <span id="headYDisplay">N/A</span>
+    </div>
+
+    <!-- Import Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <script>
+        // --- Configuration Constants ---
+        const SHOW_CAMERA_PREVIEW = true;
+        const VIDEO_PREVIEW_WIDTH = 240;
+        const VIDEO_PREVIEW_HEIGHT = 180;
+
+        const CAMERA_X_SENSITIVITY = 1.5;
+        const CAMERA_Y_SENSITIVITY = 1.0;
+        const CAMERA_Z_SENSITIVITY = 0.008;
+        const INITIAL_CAMERA_Z = 5;
+        const MIN_CAMERA_Z = 2;
+        const MAX_CAMERA_Z = 10;
+
+        // --- Global Variables ---
+        let videoElement, eyeMarkerCanvas, eyeMarkerCtx, mainCanvas;
+        let faceMesh, cameraHelper;
+        let threeJsRenderer, threeJsScene, threeJsCamera, cube, roomLines;
+
+        let ipdAtCalibrationPx = 60;
+        let distanceAtCalibrationMm = 500;
+
+        let estimatedDistanceMM = distanceAtCalibrationMm;
+        let avgEyeNormX = 0.5, avgEyeNormY = 0.5;
+        let faceDetected = false;
+        let lastValidIpdInPixels = 0;
+
+        // --- Initialization ---
+        async function initAll() {
+            videoElement = document.getElementById('videoElement');
+            eyeMarkerCanvas = document.getElementById('eyeMarkerCanvas');
+            eyeMarkerCtx = eyeMarkerCanvas.getContext('2d');
+            mainCanvas = document.getElementById('mainCanvas');
+            const calibrateButton = document.getElementById('calibrateButton');
+            const knownDistanceInput = document.getElementById('knownDistanceInput');
+            const calibrationStatus = document.getElementById('calibrationStatus');
+
+            if (!SHOW_CAMERA_PREVIEW) {
+                videoElement.style.display = 'none';
+                eyeMarkerCanvas.style.display = 'none';
+            } else {
+                videoElement.width = VIDEO_PREVIEW_WIDTH;
+                videoElement.height = VIDEO_PREVIEW_HEIGHT;
+                eyeMarkerCanvas.width = VIDEO_PREVIEW_WIDTH;
+                eyeMarkerCanvas.height = VIDEO_PREVIEW_HEIGHT;
+            }
+
+            loadCalibrationData();
+
+            calibrateButton.addEventListener('click', () => {
+                const userDistanceCm = parseFloat(knownDistanceInput.value);
+                if (isNaN(userDistanceCm) || userDistanceCm <= 0) {
+                    calibrationStatus.textContent = "Invalid distance.";
+                    return;
+                }
+                if (faceDetected && lastValidIpdInPixels > 0) {
+                    ipdAtCalibrationPx = lastValidIpdInPixels;
+                    distanceAtCalibrationMm = userDistanceCm * 10;
+                    saveCalibrationData();
+                    calibrationStatus.textContent = `Calibrated! Ref IPD: ${ipdAtCalibrationPx.toFixed(1)}px at ${distanceAtCalibrationMm}mm.`;
+                } else {
+                    calibrationStatus.textContent = "Face not detected or IPD invalid. Try again.";
+                }
+            });
+
+            await setupVideoCapture();
+            setupThreeJSScene();
+            animate();
+        }
+
+        function loadCalibrationData() {
+            const savedIpd = localStorage.getItem('calibratedIpdAtPx');
+            const savedDist = localStorage.getItem('calibratedDistanceAtMm');
+            if (savedIpd && savedDist) {
+                ipdAtCalibrationPx = parseFloat(savedIpd);
+                distanceAtCalibrationMm = parseFloat(savedDist);
+                document.getElementById('knownDistanceInput').value = distanceAtCalibrationMm / 10;
+                document.getElementById('calibrationStatus').textContent = `Loaded cal: IPD ${ipdAtCalibrationPx.toFixed(1)}px @ ${distanceAtCalibrationMm}mm.`;
+            } else {
+                document.getElementById('calibrationStatus').textContent = `Using defaults. Calibrate for accuracy.`;
+            }
+        }
+
+        function saveCalibrationData() {
+            localStorage.setItem('calibratedIpdAtPx', ipdAtCalibrationPx.toString());
+            localStorage.setItem('calibratedDistanceAtMm', distanceAtCalibrationMm.toString());
+        }
+
+        async function setupVideoCapture() {
+            faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+            faceMesh.onResults(onFaceMeshResults);
+
+            cameraHelper = new Camera(videoElement, {
+                onFrame: async () => {
+                    if (videoElement.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+                        await faceMesh.send({ image: videoElement });
+                    }
+                },
+                width: VIDEO_PREVIEW_WIDTH,
+                height: VIDEO_PREVIEW_HEIGHT
+            });
+
+            try {
+                await cameraHelper.start();
+            } catch (error) {
+                console.error('Error starting camera:', error);
+                document.getElementById('distanceDisplay').innerText = 'Cam Err';
+                document.getElementById('calibrationStatus').textContent = "Camera error!";
+                if (error.name === "NotAllowedError") {
+                    alert("Camera access was denied. Please allow camera access and refresh.");
+                }
+            }
+        }
+
+        function onFaceMeshResults(results) {
+            faceDetected = false;
+            if (SHOW_CAMERA_PREVIEW) {
+                eyeMarkerCtx.clearRect(0, 0, eyeMarkerCanvas.width, eyeMarkerCanvas.height);
+            }
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                faceDetected = true;
+                const landmarks = results.multiFaceLandmarks[0];
+                const leftEyeIndices = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+                const rightEyeIndices = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398];
+
+                const leftEyePts = leftEyeIndices.map(i => landmarks[i]);
+                const rightEyePts = rightEyeIndices.map(i => landmarks[i]);
+
+                const normLeftEyeCenter = calculateCentroid(leftEyePts);
+                const normRightEyeCenter = calculateCentroid(rightEyePts);
+
+                avgEyeNormX = (normLeftEyeCenter.x + normRightEyeCenter.x) / 2;
+                avgEyeNormY = (normLeftEyeCenter.y + normRightEyeCenter.y) / 2;
+
+                if (SHOW_CAMERA_PREVIEW) {
+                    const leftPixel = { x: normLeftEyeCenter.x * VIDEO_PREVIEW_WIDTH, y: normLeftEyeCenter.y * VIDEO_PREVIEW_HEIGHT };
+                    const rightPixel = { x: normRightEyeCenter.x * VIDEO_PREVIEW_WIDTH, y: normRightEyeCenter.y * VIDEO_PREVIEW_HEIGHT };
+                    drawEyeMarker(leftPixel, 'red');
+                    drawEyeMarker(rightPixel, 'blue');
+                }
+
+                const ipdNormalized = Math.sqrt(
+                    Math.pow(normRightEyeCenter.x - normLeftEyeCenter.x, 2) +
+                    Math.pow(normRightEyeCenter.y - normLeftEyeCenter.y, 2)
+                );
+                const currentIpdInPixels = ipdNormalized * (videoElement.videoWidth || VIDEO_PREVIEW_WIDTH);
+
+                if (currentIpdInPixels > 0) {
+                    lastValidIpdInPixels = currentIpdInPixels;
+                    estimatedDistanceMM = (ipdAtCalibrationPx / currentIpdInPixels) * distanceAtCalibrationMm;
+                }
+                document.getElementById('ipdDisplay').innerText = `${currentIpdInPixels.toFixed(1)}`;
+            } else {
+                lastValidIpdInPixels = 0;
+            }
+
+            document.getElementById('distanceDisplay').innerText = faceDetected ? `${Math.round(estimatedDistanceMM)} mm` : 'No Face';
+            const headOffsetNormX = faceDetected ? (avgEyeNormX - 0.5) * 2 : 0;
+            const headOffsetNormY = faceDetected ? (avgEyeNormY - 0.5) * 2 : 0;
+            document.getElementById('headXDisplay').innerText = faceDetected ? headOffsetNormX.toFixed(2) : 'N/A';
+            document.getElementById('headYDisplay').innerText = faceDetected ? headOffsetNormY.toFixed(2) : 'N/A';
+        }
+
+        function calculateCentroid(points) {
+            let sumX = 0, sumY = 0;
+            points.forEach(p => { sumX += p.x; sumY += p.y; });
+            return { x: sumX / points.length, y: sumY / points.length };
+        }
+        function drawEyeMarker(position, color) {
+            eyeMarkerCtx.fillStyle = color;
+            eyeMarkerCtx.beginPath();
+            eyeMarkerCtx.arc(position.x, position.y, 3, 0, 2 * Math.PI);
+            eyeMarkerCtx.fill();
+        }
+
+        function setupThreeJSScene() {
+            threeJsScene = new THREE.Scene();
+            threeJsScene.background = new THREE.Color(0x282c34);
+
+            const aspect = window.innerWidth / window.innerHeight;
+            threeJsCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
+            threeJsCamera.position.z = INITIAL_CAMERA_Z;
+
+            threeJsRenderer = new THREE.WebGLRenderer({ canvas: mainCanvas, antialias: true });
+            threeJsRenderer.setSize(window.innerWidth, window.innerHeight);
+            threeJsRenderer.setPixelRatio(window.devicePixelRatio);
+
+            const ambientLight = new THREE.AmbientLight(0x606060);
+            threeJsScene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1).normalize();
+            threeJsScene.add(directionalLight);
+
+            const geometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
+            const material = new THREE.MeshNormalMaterial();
+            cube = new THREE.Mesh(geometry, material);
+            threeJsScene.add(cube);
+
+            roomLines = new THREE.Group();
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
+            const roomDepth = 15, roomWidth = 10, roomHeight = 7;
+            const points = [
+                new THREE.Vector3(-roomWidth / 2, -roomHeight / 2, roomDepth / 2), new THREE.Vector3(roomWidth / 2, -roomHeight / 2, roomDepth / 2),
+                new THREE.Vector3(roomWidth / 2, roomHeight / 2, roomDepth / 2), new THREE.Vector3(-roomWidth / 2, roomHeight / 2, roomDepth / 2),
+                new THREE.Vector3(-roomWidth / 2, -roomHeight / 2, -roomDepth / 2), new THREE.Vector3(roomWidth / 2, -roomHeight / 2, -roomDepth / 2),
+                new THREE.Vector3(roomWidth / 2, roomHeight / 2, -roomDepth / 2), new THREE.Vector3(-roomWidth / 2, roomHeight / 2, -roomDepth / 2)
+            ];
+            for (let i = 0; i < 4; i++) { roomLines.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([points[i], points[i + 4]]), lineMaterial)); }
+            for (let i = 0; i < 4; i++) { roomLines.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([points[4 + i], points[4 + ((i + 1) % 4)]]), lineMaterial)); }
+            threeJsScene.add(roomLines);
+            roomLines.position.z = -1;
+
+            window.addEventListener('resize', onWindowResize, false);
+        }
+        function onWindowResize() {
+            threeJsCamera.aspect = window.innerWidth / window.innerHeight;
+            threeJsCamera.updateProjectionMatrix();
+            threeJsRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (threeJsCamera && faceDetected) {
+                const headOffsetNormX = (avgEyeNormX - 0.5) * 2;
+                const headOffsetNormY = (avgEyeNormY - 0.5) * 2;
+                let targetCamX = -headOffsetNormX * CAMERA_X_SENSITIVITY;
+                let targetCamY = -headOffsetNormY * CAMERA_Y_SENSITIVITY;
+                let targetCamZ = INITIAL_CAMERA_Z + (estimatedDistanceMM - distanceAtCalibrationMm) * CAMERA_Z_SENSITIVITY;
+                targetCamZ = Math.max(MIN_CAMERA_Z, Math.min(MAX_CAMERA_Z, targetCamZ));
+
+                // --- REMOVED SMOOTHING: Direct assignment ---
+                threeJsCamera.position.x = targetCamX;
+                threeJsCamera.position.y = targetCamY;
+                threeJsCamera.position.z = targetCamZ;
+
+                threeJsCamera.lookAt(cube.position);
+            } else if (threeJsCamera) {
+                // Gradually return to default if no face detected (smoothing kept here for less jarring reset)
+                threeJsCamera.position.x += (0 - threeJsCamera.position.x) * 0.05;
+                threeJsCamera.position.y += (0 - threeJsCamera.position.y) * 0.05;
+                threeJsCamera.position.z += (INITIAL_CAMERA_Z - threeJsCamera.position.z) * 0.05;
+                threeJsCamera.lookAt(cube.position);
+            }
+
+            if (threeJsRenderer && threeJsScene && threeJsCamera) {
+                threeJsRenderer.render(threeJsScene, threeJsCamera);
+            }
+        }
+
+        window.onload = initAll;
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Wiggle-stereo cube</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            height: 100%
+        }
+
+        body {
+            background: #000;
+            overflow: hidden
+        }
+
+        #renderCanvas {
+            width: 100%;
+            height: 100%
+        }
+    </style>
+</head>
+
+<body>
+    <div id="renderCanvas"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, renderer, cube;
+        let leftCamera, rightCamera, currentEye = 'left';
+
+        /* ---------- scene & cameras ---------- */
+        init();
+        requestAnimationFrame(animate);
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+
+            const aspect = window.innerWidth / window.innerHeight;
+            leftCamera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+            rightCamera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+
+            const ipd = 0.16;      // 0.16 world-units ≈ 8 cm
+            leftCamera.position.set(-ipd / 2, 0, 5);
+            rightCamera.position.set(ipd / 2, 0, 5);
+
+            const geo = new THREE.BoxGeometry(2, 2, 2);
+            const mat = new THREE.MeshNormalMaterial();
+            cube = new THREE.Mesh(geo, mat);
+            cube.rotation.x += 1;
+            cube.rotation.y += 0.5;
+            scene.add(cube);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('renderCanvas')
+                .appendChild(renderer.domElement);
+
+            window.addEventListener('resize', () => {
+                const a = window.innerWidth / window.innerHeight;
+                leftCamera.aspect = rightCamera.aspect = a;
+                leftCamera.updateProjectionMatrix();
+                rightCamera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        /* ---------- render loop ---------- */
+        const alternationFrequency = 30;          // Hz
+        const alternationInterval = 1000 / alternationFrequency;
+        let lastSwap = performance.now();
+
+        function animate(now) {
+            requestAnimationFrame(animate);
+
+            //cube.rotation.x += 0.01;
+            //cube.rotation.y += 0.013;
+
+            if (now - lastSwap >= alternationInterval) {
+                currentEye = currentEye === 'left' ? 'right' : 'left';
+                lastSwap = now;
+            }
+            renderer.render(scene, currentEye === 'left' ? leftCamera : rightCamera);
+        }
+    </script>
+</body>
+
+</html>
