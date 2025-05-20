@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Head Tracking Cube - No Smoothing</title>
+    <title>3D Head Tracking Car - Interactive</title>
     <style>
         body {
             margin: 0;
@@ -102,6 +102,16 @@
             color: #a0a0a0;
             margin-top: 4px;
         }
+
+        #controlsInfo {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
     </style>
 </head>
 
@@ -125,6 +135,14 @@
         Head X: <span id="headXDisplay">N/A</span>, Y: <span id="headYDisplay">N/A</span>
     </div>
 
+    <div id="controlsInfo" class="info-panel">
+        <b>Car Controls:</b><br>
+        Arrow Up: Accelerate<br>
+        Arrow Down: Brake/Reverse<br>
+        Arrow Left: Turn Left<br>
+        Arrow Right: Turn Right
+    </div>
+
     <!-- Import Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -136,25 +154,34 @@
         const VIDEO_PREVIEW_WIDTH = 240;
         const VIDEO_PREVIEW_HEIGHT = 180;
 
-        const CAMERA_X_SENSITIVITY = 1.5;
+        const CAMERA_X_SENSITIVITY = 1.1;
         const CAMERA_Y_SENSITIVITY = 1.0;
-        const CAMERA_Z_SENSITIVITY = 0.008;
+        const CAMERA_Z_SENSITIVITY = 0.00; // mm to 3D units
         const INITIAL_CAMERA_Z = 5;
         const MIN_CAMERA_Z = 2;
         const MAX_CAMERA_Z = 10;
 
+        const CAR_ACCELERATION = 0.002;
+        const CAR_BRAKE_FORCE = 0.003;
+        const CAR_MAX_SPEED = 0.1;
+        const CAR_TURN_SPEED = 0.03;
+        const CAR_FRICTION = 0.97; // Higher = less friction
+
         // --- Global Variables ---
         let videoElement, eyeMarkerCanvas, eyeMarkerCtx, mainCanvas;
         let faceMesh, cameraHelper;
-        let threeJsRenderer, threeJsScene, threeJsCamera, cube, roomLines;
+        let threeJsRenderer, threeJsScene, threeJsCamera, car, groundGrid;
 
         let ipdAtCalibrationPx = 60;
-        let distanceAtCalibrationMm = 500;
+        let distanceAtCalibrationMm = 500; // 50 cm
 
         let estimatedDistanceMM = distanceAtCalibrationMm;
         let avgEyeNormX = 0.5, avgEyeNormY = 0.5;
         let faceDetected = false;
         let lastValidIpdInPixels = 0;
+
+        let carSpeed = 0;
+        const keysPressed = {};
 
         // --- Initialization ---
         async function initAll() {
@@ -194,6 +221,7 @@
                 }
             });
 
+            setupKeyboardControls();
             await setupVideoCapture();
             setupThreeJSScene();
             animate();
@@ -215,6 +243,15 @@
         function saveCalibrationData() {
             localStorage.setItem('calibratedIpdAtPx', ipdAtCalibrationPx.toString());
             localStorage.setItem('calibratedDistanceAtMm', distanceAtCalibrationMm.toString());
+        }
+
+        function setupKeyboardControls() {
+            document.addEventListener('keydown', (event) => {
+                keysPressed[event.key] = true;
+            });
+            document.addEventListener('keyup', (event) => {
+                keysPressed[event.key] = false;
+            });
         }
 
         async function setupVideoCapture() {
@@ -260,29 +297,27 @@
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 faceDetected = true;
                 const landmarks = results.multiFaceLandmarks[0];
-                const leftEyeIndices = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
-                const rightEyeIndices = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398];
+                // Use a more central point between eyes for head tracking
+                const leftEyeInner = landmarks[133]; // Left eye inner corner
+                const rightEyeInner = landmarks[362]; // Right eye inner corner
 
-                const leftEyePts = leftEyeIndices.map(i => landmarks[i]);
-                const rightEyePts = rightEyeIndices.map(i => landmarks[i]);
+                avgEyeNormX = (leftEyeInner.x + rightEyeInner.x) / 2;
+                avgEyeNormY = (leftEyeInner.y + rightEyeInner.y) / 2;
 
-                const normLeftEyeCenter = calculateCentroid(leftEyePts);
-                const normRightEyeCenter = calculateCentroid(rightEyePts);
-
-                avgEyeNormX = (normLeftEyeCenter.x + normRightEyeCenter.x) / 2;
-                avgEyeNormY = (normLeftEyeCenter.y + normRightEyeCenter.y) / 2;
 
                 if (SHOW_CAMERA_PREVIEW) {
-                    const leftPixel = { x: normLeftEyeCenter.x * VIDEO_PREVIEW_WIDTH, y: normLeftEyeCenter.y * VIDEO_PREVIEW_HEIGHT };
-                    const rightPixel = { x: normRightEyeCenter.x * VIDEO_PREVIEW_WIDTH, y: normRightEyeCenter.y * VIDEO_PREVIEW_HEIGHT };
-                    drawEyeMarker(leftPixel, 'red');
-                    drawEyeMarker(rightPixel, 'blue');
+                    drawEyeMarker({ x: leftEyeInner.x * VIDEO_PREVIEW_WIDTH, y: leftEyeInner.y * VIDEO_PREVIEW_HEIGHT }, 'red');
+                    drawEyeMarker({ x: rightEyeInner.x * VIDEO_PREVIEW_WIDTH, y: rightEyeInner.y * VIDEO_PREVIEW_HEIGHT }, 'blue');
                 }
 
-                const ipdNormalized = Math.sqrt(
-                    Math.pow(normRightEyeCenter.x - normLeftEyeCenter.x, 2) +
-                    Math.pow(normRightEyeCenter.y - normLeftEyeCenter.y, 2)
-                );
+                // IPD calculation using specific eye landmarks for better consistency
+                // Left eye: 33 (outer), 133 (inner). Right eye: 362 (inner), 263 (outer)
+                // Or for more robust IPD use points on the cheekbones or temples that are less affected by eye squinting
+                // Let's use left-most point on left eye (33) and right-most point on right eye (263)
+                const p1 = landmarks[33];  // Outer left eye corner
+                const p2 = landmarks[263]; // Outer right eye corner
+
+                const ipdNormalized = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
                 const currentIpdInPixels = ipdNormalized * (videoElement.videoWidth || VIDEO_PREVIEW_WIDTH);
 
                 if (currentIpdInPixels > 0) {
@@ -291,7 +326,7 @@
                 }
                 document.getElementById('ipdDisplay').innerText = `${currentIpdInPixels.toFixed(1)}`;
             } else {
-                lastValidIpdInPixels = 0;
+                // lastValidIpdInPixels = 0; // Keep last valid if face temporarily lost? Or reset? Resetting might be too jumpy.
             }
 
             document.getElementById('distanceDisplay').innerText = faceDetected ? `${Math.round(estimatedDistanceMM)} mm` : 'No Face';
@@ -301,11 +336,7 @@
             document.getElementById('headYDisplay').innerText = faceDetected ? headOffsetNormY.toFixed(2) : 'N/A';
         }
 
-        function calculateCentroid(points) {
-            let sumX = 0, sumY = 0;
-            points.forEach(p => { sumX += p.x; sumY += p.y; });
-            return { x: sumX / points.length, y: sumY / points.length };
-        }
+
         function drawEyeMarker(position, color) {
             eyeMarkerCtx.fillStyle = color;
             eyeMarkerCtx.beginPath();
@@ -315,73 +346,205 @@
 
         function setupThreeJSScene() {
             threeJsScene = new THREE.Scene();
-            threeJsScene.background = new THREE.Color(0x282c34);
+            threeJsScene.background = new THREE.Color(0x1a2a3a); // A bit lighter, bluish dark
+            threeJsScene.fog = new THREE.Fog(0x1a2a3a, 15, 40);
+
 
             const aspect = window.innerWidth / window.innerHeight;
             threeJsCamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-            threeJsCamera.position.z = INITIAL_CAMERA_Z;
+            // Initial camera position will be set in animate relative to car,
+            // but set a default further back for the initial frame.
+            threeJsCamera.position.set(0, 2, INITIAL_CAMERA_Z + 2);
+
 
             threeJsRenderer = new THREE.WebGLRenderer({ canvas: mainCanvas, antialias: true });
             threeJsRenderer.setSize(window.innerWidth, window.innerHeight);
             threeJsRenderer.setPixelRatio(window.devicePixelRatio);
+            threeJsRenderer.shadowMap.enabled = true; // Enable shadows
+            threeJsRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-            const ambientLight = new THREE.AmbientLight(0x606060);
+
+            const ambientLight = new THREE.AmbientLight(0x606070); // Soft ambient
             threeJsScene.add(ambientLight);
+
             const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(1, 1, 1).normalize();
+            directionalLight.position.set(5, 10, 7.5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 1024;
+            directionalLight.shadow.mapSize.height = 1024;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -15;
+            directionalLight.shadow.camera.right = 15;
+            directionalLight.shadow.camera.top = 15;
+            directionalLight.shadow.camera.bottom = -15;
             threeJsScene.add(directionalLight);
 
-            const geometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
-            const material = new THREE.MeshNormalMaterial();
-            cube = new THREE.Mesh(geometry, material);
-            threeJsScene.add(cube);
+            // const shadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera);
+            // threeJsScene.add(shadowHelper); // For debugging shadow camera
 
-            roomLines = new THREE.Group();
-            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
-            const roomDepth = 15, roomWidth = 10, roomHeight = 7;
-            const points = [
-                new THREE.Vector3(-roomWidth / 2, -roomHeight / 2, roomDepth / 2), new THREE.Vector3(roomWidth / 2, -roomHeight / 2, roomDepth / 2),
-                new THREE.Vector3(roomWidth / 2, roomHeight / 2, roomDepth / 2), new THREE.Vector3(-roomWidth / 2, roomHeight / 2, roomDepth / 2),
-                new THREE.Vector3(-roomWidth / 2, -roomHeight / 2, -roomDepth / 2), new THREE.Vector3(roomWidth / 2, -roomHeight / 2, -roomDepth / 2),
-                new THREE.Vector3(roomWidth / 2, roomHeight / 2, -roomDepth / 2), new THREE.Vector3(-roomWidth / 2, roomHeight / 2, -roomDepth / 2)
+
+            // --- Create the Car ---
+            car = new THREE.Group();
+            car.position.y = 0.3; // Lift car slightly so it's on top of grid
+
+            // Car Body (Red)
+            const bodyWidth = 0.8;
+            const bodyHeight = 0.4;
+            const bodyDepth = 1.5;
+            const bodyGeometry = new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth);
+            const bodyMaterial = new THREE.MeshStandardMaterial({
+                color: 0xff0000, // Red
+                roughness: 0.4,
+                metalness: 0.2
+            });
+            const bodyMesh = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            bodyMesh.castShadow = true;
+            bodyMesh.receiveShadow = true; // Body can receive shadows from roof
+            car.add(bodyMesh);
+
+            // Car Roof (Black)
+            const roofWidth = bodyWidth * 0.9;
+            const roofHeight = bodyHeight * 0.7;
+            const roofDepth = bodyDepth * 0.6;
+            const roofGeometry = new THREE.BoxGeometry(roofWidth, roofHeight, roofDepth);
+            const roofMaterial = new THREE.MeshStandardMaterial({
+                color: 0x111111, // Black
+                roughness: 0.6,
+                metalness: 0.1
+            });
+            const roofMesh = new THREE.Mesh(roofGeometry, roofMaterial);
+            roofMesh.position.y = bodyHeight / 2 + roofHeight / 2 - 0.05; // Position on top of body
+            roofMesh.position.z = -bodyDepth * 0.1; // Slightly towards the back
+            roofMesh.castShadow = true;
+            // roofMesh.receiveShadow = false; // Roof unlikely to receive shadows from itself
+            car.add(roofMesh);
+
+            // Simple Wheels (optional, for visual cue)
+            const wheelRadius = 0.2;
+            const wheelThickness = 0.1;
+            const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelThickness, 16);
+            wheelGeometry.rotateX(Math.PI / 2); // Orient wheels correctly
+            wheelGeometry.rotateY(Math.PI / 2); // Orient wheels correctly
+            const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+
+            const wheelPositions = [
+                { x: bodyWidth / 2 + wheelThickness / 2, y: -bodyHeight / 2 + wheelRadius, z: bodyDepth / 2 * 0.7 },
+                { x: -bodyWidth / 2 - wheelThickness / 2, y: -bodyHeight / 2 + wheelRadius, z: bodyDepth / 2 * 0.7 },
+                { x: bodyWidth / 2 + wheelThickness / 2, y: -bodyHeight / 2 + wheelRadius, z: -bodyDepth / 2 * 0.7 },
+                { x: -bodyWidth / 2 - wheelThickness / 2, y: -bodyHeight / 2 + wheelRadius, z: -bodyDepth / 2 * 0.7 },
             ];
-            for (let i = 0; i < 4; i++) { roomLines.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([points[i], points[i + 4]]), lineMaterial)); }
-            for (let i = 0; i < 4; i++) { roomLines.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([points[4 + i], points[4 + ((i + 1) % 4)]]), lineMaterial)); }
-            threeJsScene.add(roomLines);
-            roomLines.position.z = -1;
+
+            wheelPositions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+                wheel.position.set(pos.x, pos.y, pos.z);
+                wheel.castShadow = true;
+                car.add(wheel);
+            });
+
+
+            threeJsScene.add(car);
+
+            // --- Ground Grid ---
+            const gridSize = 40;
+            const gridDivisions = 40;
+            groundGrid = new THREE.GridHelper(gridSize, gridDivisions, 0x444444, 0x555555);
+            // groundGrid.position.y = 0; // Grid is at y=0, car is slightly above
+            groundGrid.receiveShadow = true; // Grid should receive shadows
+            threeJsScene.add(groundGrid);
+
+            // Add a simple ground plane for shadows if GridHelper doesn't receive them well enough
+            const groundPlaneGeo = new THREE.PlaneGeometry(gridSize, gridSize);
+            const groundPlaneMat = new THREE.ShadowMaterial({ opacity: 0.3 }); // Receives shadows, transparent
+            const groundPlane = new THREE.Mesh(groundPlaneGeo, groundPlaneMat);
+            groundPlane.rotation.x = -Math.PI / 2;
+            groundPlane.receiveShadow = true;
+            threeJsScene.add(groundPlane);
+
 
             window.addEventListener('resize', onWindowResize, false);
         }
+
         function onWindowResize() {
+            if (!threeJsCamera || !threeJsRenderer) return;
             threeJsCamera.aspect = window.innerWidth / window.innerHeight;
             threeJsCamera.updateProjectionMatrix();
             threeJsRenderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        function updateCarMovement() {
+            if (!car) return;
+
+            // Acceleration and Braking
+            if (keysPressed['ArrowUp']) {
+                carSpeed += CAR_ACCELERATION;
+            } else if (keysPressed['ArrowDown']) {
+                carSpeed -= CAR_BRAKE_FORCE;
+            } else {
+                // Apply friction if no acceleration/braking
+                carSpeed *= CAR_FRICTION;
+            }
+
+            // Clamp speed
+            carSpeed = Math.max(-CAR_MAX_SPEED / 2, Math.min(CAR_MAX_SPEED, carSpeed)); // Allow slower reverse
+
+            // Stop if speed is very low
+            if (Math.abs(carSpeed) < 0.0001) {
+                carSpeed = 0;
+            }
+
+            // Turning (only when moving)
+            if (carSpeed !== 0) {
+                const turnDirection = (keysPressed['ArrowLeft'] ? 1 : 0) - (keysPressed['ArrowRight'] ? 1 : 0);
+                car.rotation.y += turnDirection * CAR_TURN_SPEED * (carSpeed > 0 ? 1 : -1); // Invert turn for reverse
+            }
+
+            // Move the car forward/backward in its current direction
+            car.translateZ(-carSpeed); // Negative Z is typically "forward" in object space
+        }
+
+
         function animate() {
             requestAnimationFrame(animate);
 
-            if (threeJsCamera && faceDetected) {
-                const headOffsetNormX = (avgEyeNormX - 0.5) * 2;
-                const headOffsetNormY = (avgEyeNormY - 0.5) * 2;
-                let targetCamX = -headOffsetNormX * CAMERA_X_SENSITIVITY;
-                let targetCamY = -headOffsetNormY * CAMERA_Y_SENSITIVITY;
-                let targetCamZ = INITIAL_CAMERA_Z + (estimatedDistanceMM - distanceAtCalibrationMm) * CAMERA_Z_SENSITIVITY;
-                targetCamZ = Math.max(MIN_CAMERA_Z, Math.min(MAX_CAMERA_Z, targetCamZ));
+            updateCarMovement();
 
-                // --- REMOVED SMOOTHING: Direct assignment ---
-                threeJsCamera.position.x = targetCamX;
-                threeJsCamera.position.y = targetCamY;
-                threeJsCamera.position.z = targetCamZ;
+            if (threeJsCamera && car) {
+                let targetCamX, targetCamY, targetCamZ;
 
-                threeJsCamera.lookAt(cube.position);
-            } else if (threeJsCamera) {
-                // Gradually return to default if no face detected (smoothing kept here for less jarring reset)
-                threeJsCamera.position.x += (0 - threeJsCamera.position.x) * 0.05;
-                threeJsCamera.position.y += (0 - threeJsCamera.position.y) * 0.05;
-                threeJsCamera.position.z += (INITIAL_CAMERA_Z - threeJsCamera.position.z) * 0.05;
-                threeJsCamera.lookAt(cube.position);
+                if (faceDetected) {
+                    const headOffsetNormX = (avgEyeNormX - 0.5) * 2; // Range -1 to 1
+                    const headOffsetNormY = (avgEyeNormY - 0.5) * 2; // Range -1 to 1
+
+                    // Base camera position relative to car (behind and slightly above)
+                    const baseCamOffset = new THREE.Vector3(0, 1.5, INITIAL_CAMERA_Z);
+
+                    // Apply head tracking offsets to this base position
+                    // This will make the camera orbit around the car based on head movement
+                    const headTrackedOffset = new THREE.Vector3(
+                        -headOffsetNormX * CAMERA_X_SENSITIVITY,
+                        -headOffsetNormY * CAMERA_Y_SENSITIVITY, // Reduce vertical sensitivity for more natural feel
+                        (estimatedDistanceMM - distanceAtCalibrationMm) * CAMERA_Z_SENSITIVITY
+                    );
+
+                    const desiredCameraPosition = baseCamOffset.add(headTrackedOffset);
+
+                    // Transform this desired offset to world space based on car's orientation
+                    const worldDesiredPosition = desiredCameraPosition.applyMatrix4(car.matrixWorld);
+
+                    // No smoothing for head tracking part
+                    threeJsCamera.position.copy(worldDesiredPosition);
+
+                } else {
+                    // If no face, smoothly go to a default position behind the car
+                    const defaultOffset = new THREE.Vector3(0, 1.5, INITIAL_CAMERA_Z + 1);
+                    const worldDefaultPosition = defaultOffset.applyMatrix4(car.matrixWorld);
+                    threeJsCamera.position.lerp(worldDefaultPosition, 0.05);
+                }
+
+                threeJsCamera.lookAt(car.position.clone().add(new THREE.Vector3(0, 0.5, 0))); // Look slightly above car's base
             }
+
 
             if (threeJsRenderer && threeJsScene && threeJsCamera) {
                 threeJsRenderer.render(threeJsScene, threeJsCamera);
